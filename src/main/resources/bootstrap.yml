@@ -1,0 +1,6 @@
+spring:
+  application:
+    name: 'Web Crawler API'
+  logging:
+    pattern:
+      console: '%d{dd MMM yyyy HH:mm:ss}|%5p|%c{1}|%m%n'
