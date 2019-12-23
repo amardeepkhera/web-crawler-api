@@ -1,41 +1,36 @@
 package au.com.qantas.downstream.web
 
-import au.com.qantas.GetWebResourceException
 import mu.KotlinLogging
-import org.jsoup.HttpStatusException
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.safety.Whitelist
-import org.springframework.cache.annotation.Cacheable
 import org.springframework.data.domain.Pageable
-import org.springframework.http.HttpStatus
+import org.springframework.http.HttpMethod
 import org.springframework.stereotype.Repository
-import java.net.UnknownHostException
+import org.springframework.web.reactive.function.client.WebClient
+import reactor.core.publisher.Mono
+import java.net.URI
 
 
 @Repository
 class WebRepository {
     private val logger = KotlinLogging.logger { }
 
-    @Cacheable("webResource")
-    fun getWebResource(url: String, pageable: Pageable): WebResource {
+    private val webClient = WebClient.builder().build()
+
+
+    fun getWebResource(url: String, pageable: Pageable): Mono<WebResource> {
         logger.info { "Fetching $url" }
-        return runCatching {
-            execute(url, pageable)
-        }.getOrElse {
-            logger.error(it) { "Error fetching url: $url" }
-            it.convertAndRethrow(url)
-        }
+
+        return execute(url, pageable)
     }
 
     private fun execute(url: String, pageable: Pageable) =
-        Jsoup.connect(url)
-            .followRedirects(true)
-            .timeout(2000)
-            .userAgent("Mozilla")
-            .execute()
-            .run { Jsoup.clean(body(), Whitelist.relaxed().addTags("title")) }
-            .run { Jsoup.parse(this).toWebResource(url, pageable) }
+        webClient.method(HttpMethod.GET).uri(URI.create(url)).retrieve().bodyToMono(String::class.java)
+            .map {
+                Jsoup.clean(it, Whitelist.relaxed().addTags("title"))
+                    .run { Jsoup.parse(this).toWebResource(url, pageable) }
+            }
 
 
     private fun Document.toWebResource(url: String, pageable: Pageable): WebResource {
@@ -61,14 +56,14 @@ class WebRepository {
         .distinct()
         .toList()
 
-    private fun Throwable.convertAndRethrow(url: String): Nothing = when (this) {
-        is UnknownHostException -> throw GetWebResourceException(
-            HttpStatus.NOT_FOUND.value(),
-            "Resource not found:$url",
-            this
-        )
-        is HttpStatusException -> throw GetWebResourceException(statusCode, message, this)
-        else -> throw GetWebResourceException(HttpStatus.INTERNAL_SERVER_ERROR.value(), message, this)
-    }
+//    private fun Throwable.convertAndRethrow(url: String): Nothing = when (this) {
+//        is UnknownHostException -> throw GetWebResourceException(
+//            HttpStatus.NOT_FOUND.value(),
+//            "Resource not found:$url",
+//            this
+//        )
+//        is HttpStatusException -> throw GetWebResourceException(statusCode, message, this)
+//        else -> throw GetWebResourceException(HttpStatus.INTERNAL_SERVER_ERROR.value(), message, this)
+//    }
 
 }
