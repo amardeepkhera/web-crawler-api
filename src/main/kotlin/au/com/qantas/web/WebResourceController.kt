@@ -19,11 +19,11 @@ class WebResourceController(private val webResourceService: WebResourceService) 
     ): Resource<GetWebResourceResponse> {
         return webResourceService.getWebResource(url, depth ?: 1, pageable).run {
             Resource(
-                GetWebResourceResponse(this), selfLink(depth ?: 1, pageable)
-            ).apply {
-                nextLink(depth ?: 1, pageable)?.let { add(it) }
-                previousLink(depth ?: 1, pageable)?.let { add(it) }
-            }
+                GetWebResourceResponse(this.block()))
+//            ).apply {
+//                nextLink(depth ?: 1, pageable)?.let { add(it) }
+//                previousLink(depth ?: 1, pageable)?.let { add(it) }
+//            }
 
         }
     }
