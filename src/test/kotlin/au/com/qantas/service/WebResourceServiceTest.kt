@@ -44,7 +44,7 @@ class WebResourceServiceTest {
 
     @Test
     fun verify() {
-        stub(url = "qantas", responseStatus = HttpStatus.NOT_FOUND)
+        stub(url = "qantas")
         stub("hotels")
         stub("shopping")
         stub("frequent-flyers", "frequent_flyers")
@@ -54,8 +54,9 @@ class WebResourceServiceTest {
         stub("the-good-guys", "good_guys")
         stub("david-jones", "david_jones")
         stub("search")
-
-        webResourceService.getWebResource("http://localhost:8080/qantas", 2, PageRequest.of(1, 2))
-            .block()
+        webResourceService.getWebResource("http://localhost:8080/qantas", 1, PageRequest.of(1, 2))
+            .block().also {
+                println(it)
+            }
     }
 }

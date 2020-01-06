@@ -6,6 +6,7 @@ import org.springframework.hateoas.Resource
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import reactor.core.publisher.Mono
 
 @RestController
 class WebResourceController(private val webResourceService: WebResourceService) {
@@ -16,10 +17,11 @@ class WebResourceController(private val webResourceService: WebResourceService) 
         @RequestParam("url") url: String,
         @RequestParam(value = "depth", required = false) depth: Int?,
         pageable: Pageable
-    ): Resource<GetWebResourceResponse> {
-        return webResourceService.getWebResource(url, depth ?: 1, pageable).run {
+    ): Mono<Resource<GetWebResourceResponse>> {
+        return webResourceService.getWebResource(url, depth ?: 1, pageable).map {
             Resource(
-                GetWebResourceResponse(this.block()))
+                GetWebResourceResponse(it)
+            )
 //            ).apply {
 //                nextLink(depth ?: 1, pageable)?.let { add(it) }
 //                previousLink(depth ?: 1, pageable)?.let { add(it) }

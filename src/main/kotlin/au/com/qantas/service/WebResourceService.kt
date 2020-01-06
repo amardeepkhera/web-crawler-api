@@ -2,87 +2,104 @@ package au.com.qantas.service
 
 import au.com.qantas.downstream.web.WebRepository
 import au.com.qantas.web.WebResource
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
-import java.util.concurrent.Executors
+import reactor.core.scheduler.Schedulers
 
 @Service
 class WebResourceService(
-    private val webRepository: WebRepository,
-    @Value("\${app.http-threads}") private val httpThreads: Int
+    private val webRepository: WebRepository
 ) {
 
-    private val executorService = Executors.newFixedThreadPool(httpThreads)
-
-
-    fun getWebResource(url: String, depth: Int, pageable: Pageable): Mono<WebResource> {
+    fun getWebResource(url: String, depth: Int, pageable: Pageable): Mono<WebResource> =
         url.fetch(pageable)
-            .onErrorResume { Mono.error(it) }
-            .flatMapMany {
-                Flux.fromIterable(it.links.take(pageable.pageSize))
-                    .expandDeep {
-                        it.fetch(pageable).map {
-                            it.links
-                        }.flatMapMany {
-                            Flux.fromIterable(it)
-                        }.take(depth.toLong())
-                    }
-            }.collectList()
-            .flatMapMany {
-                Flux.fromIterable(it).flatMap {
-                    it.fetch(pageable)
-                }
+            .onErrorResume {
+                Mono.error(it)
+            }.flatMap { webResource ->
+                Mono.just(webResource).flatMapMany {
+                    Flux.fromIterable(it.links.take(pageable.pageSize))
+                        .map {
+                            FlatWebResource(it, 1)
+                        }.expandDeep { fwr ->
+                            if (fwr.depth >= depth) {
+                                return@expandDeep Flux.empty()
+                            }
+                            fwr.url.fetch(pageable)
+                                .map {
+                                    it.links
+                                }.flatMapMany {
+                                    Flux.fromIterable(it).map {
+                                        FlatWebResource(it, fwr.depth + 1, fwr)
+                                    }.subscribeOn(Schedulers.parallel())
+                                }
+                        }.subscribeOn(Schedulers.parallel())
+                }.collectList()
+                    .flatMapMany {
+                        Flux.fromIterable(it).flatMapSequential {
+                            it.fetch(pageable)
+                        }.subscribeOn(Schedulers.parallel())
+                    }.collectList().map { newWebResource(webResource, it, depth) }
             }
-            .collectList()
-            .block()
-            .also {
-                println(it)
-            }
-        return Mono.empty()
 
-    }
+
+    private data class FlatWebResource(
+        val url: String,
+        val depth: Int,
+        val parent: FlatWebResource? = null,
+        val webResource: au.com.qantas.downstream.web.WebResource? = null
+    )
 
 
     private fun String.fetch(pageable: Pageable) = webRepository.getWebResource(this, pageable)
+        .onErrorResume {
+            it.printStackTrace()
+            Mono.empty()
+        }
 
+    private fun FlatWebResource.fetch(pageable: Pageable) = url.fetch(pageable).map {
+        copy(webResource = it)
+    }
 
-//    private fun DownStreamWebResource.recurse(depth: Int, pageable: Pageable): WebResource {
-//        return if (depth == 0) {
-//            WebResource(
-//                url = url,
-//                title = title,
-//                nodes = emptyList(),
-//                totalNodeCount = 0
-//            )
-//        } else {
-//            WebResource(
-//                url = url,
-//                title = title,
-//                nodes = links.parallel(pageable)
-//                    .mapNotNull {
-//                        it?.recurse(depth - 1, pageable)
-//                    },
-//                totalNodeCount = totalLinkCount
-//            )
-//        }
-//    }
-//
-//    private fun List<String>.parallel(pageable: Pageable) =
-//        asSequence()
-//            .map { it.fetchOrNull(pageable) }
-//            .map {
-//                it.join()
-//            }.toList()
-//
-//    private fun String.fetchOrNull(pageable: Pageable) = CompletableFuture.supplyAsync(Supplier {
-//        webRepository.getWebResource(
-//            this,
-//            pageable
-//        )
-//    }, executorService).exceptionally { null }
+    private fun newWebResource(
+        webResource: au.com.qantas.downstream.web.WebResource,
+        flatWebResources: List<FlatWebResource>,
+        depth: Int
+    ): WebResource {
+        val depthMap = flatWebResources.groupBy { it.depth }
+
+        return WebResource(
+            url = webResource.url,
+            title = webResource.title,
+            totalNodeCount = webResource.totalLinkCount,
+            nodes = recurse(depth, 1, null, depthMap)
+        )
+    }
+
+    private fun recurse(
+        depth: Int,
+        depthCounter: Int,
+        flatWebResource: FlatWebResource?,
+        depthMap: Map<Int, List<FlatWebResource>>
+    ): List<WebResource> {
+        if (depthCounter > depth) {
+            return emptyList()
+        }
+        return depthMap.getOrDefault(depthCounter, emptyList())
+            .filter {
+                it.parent?.url == flatWebResource?.url
+            }
+            .map {
+                WebResource(
+                    it.url,
+                    it.webResource!!.title,
+                    recurse(depth, depthCounter + 1, it, depthMap),
+                    it.webResource!!.totalLinkCount
+                )
+            }
+
+    }
 }
 
 
