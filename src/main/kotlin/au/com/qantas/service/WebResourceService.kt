@@ -20,6 +20,7 @@ class WebResourceService(
             }.flatMap { webResource ->
                 Mono.just(webResource).flatMapMany {
                     Flux.fromIterable(it.links.take(pageable.pageSize))
+                        .subscribeOn(Schedulers.parallel())
                         .map {
                             FlatWebResource(it, 1)
                         }.expandDeep { fwr ->
@@ -30,17 +31,17 @@ class WebResourceService(
                                 .map {
                                     it.links
                                 }.flatMapMany {
-                                    Flux.fromIterable(it).map {
-                                        FlatWebResource(it, fwr.depth + 1, fwr)
-                                    }.subscribeOn(Schedulers.parallel())
+                                    Flux.fromIterable(it)
+                                        .map {
+                                            FlatWebResource(it, fwr.depth + 1, fwr)
+                                        }.take(pageable.pageSize.toLong())
+                                        .subscribeOn(Schedulers.parallel())
                                 }
-                        }.subscribeOn(Schedulers.parallel())
+                        }
+                }.flatMapSequential {
+                    it.fetch(pageable)
                 }.collectList()
-                    .flatMapMany {
-                        Flux.fromIterable(it).flatMapSequential {
-                            it.fetch(pageable)
-                        }.subscribeOn(Schedulers.parallel())
-                    }.collectList().map { newWebResource(webResource, it, depth) }
+                    .map { newWebResource(webResource, it, depth) }
             }
 
 
@@ -56,7 +57,7 @@ class WebResourceService(
         .onErrorResume {
             it.printStackTrace()
             Mono.empty()
-        }
+        }.subscribeOn(Schedulers.parallel())
 
     private fun FlatWebResource.fetch(pageable: Pageable) = url.fetch(pageable).map {
         copy(webResource = it)
